@@ -1,11 +1,15 @@
 import os
-import json
+import requests
+from io import BytesIO
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from openai import OpenAI
 
 app = Flask(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 
 conversation_history = {}
 
@@ -171,7 +175,6 @@ Cliente: "¿Arreglan botas Carmelo?"
 Carmelo: "¡Claro! Carmelo somos nosotros — es nuestra marca. Contame qué necesitás reparar."
 """
 
-
 def get_gpt_response(user_phone: str, user_message: str) -> str:
     if user_phone not in conversation_history:
         conversation_history[user_phone] = []
@@ -207,31 +210,63 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
         print(f"Error OpenAI: {e}")
         return "Hola! En este momento tenemos una dificultad técnica. Por favor escribinos en unos minutos o llamanos directamente. Disculpá las molestias 🙏"
 
+def transcribe_audio(media_url: str) -> str:
+    """Descarga el audio de Twilio y lo transcribe con Whisper."""
+    try:
+        audio_response = requests.get(
+            media_url,
+            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
+            timeout=30
+        )
+        audio_response.raise_for_status()
+
+        audio_file = BytesIO(audio_response.content)
+        audio_file.name = "audio.ogg"
+
+        transcription = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file
+        )
+        return transcription.text
+
+    except Exception as e:
+        print(f"Error transcribiendo audio: {e}")
+        return ""
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     incoming_msg = request.values.get("Body", "").strip()
     from_number = request.values.get("From", "")
+    media_url = request.values.get("MediaUrl0", "")
+    media_type = request.values.get("MediaContentType0", "")
 
-    print(f"Mensaje de {from_number}: {incoming_msg}")
+    # Si hay audio, transcribir con Whisper
+    if media_url and "audio" in media_type:
+        print(f"Audio recibido de {from_number} — transcribiendo...")
+        transcription = transcribe_audio(media_url)
+        if transcription:
+            incoming_msg = transcription
+            print(f"Transcripción: {incoming_msg}")
+        else:
+            resp = MessagingResponse()
+            resp.message("No pude entender el audio. ¿Me podés escribir tu consulta?")
+            return str(resp)
 
     if not incoming_msg:
         resp = MessagingResponse()
         return str(resp)
 
+    print(f"Mensaje de {from_number}: {incoming_msg}")
     reply = get_gpt_response(from_number, incoming_msg)
-
     print(f"Respuesta: {reply}")
 
     resp = MessagingResponse()
     resp.message(reply)
     return str(resp)
 
-
 @app.route("/", methods=["GET"])
 def health():
     return "Bot de Botas de Equitacion - OK 🥾", 200
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
