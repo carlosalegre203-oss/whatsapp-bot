@@ -202,12 +202,12 @@ Paso 5 — Confirmá todo antes de registrar:
   📅 Fecha y hora: [día] a las [hora]
   ⚡ Modalidad: [urgente / normal]
   ¿Todo correcto?"
-Paso 6 — Cuando el cliente confirme → llamá a la función crear_turno (incluí telefono_cliente si lo tenés).
-Paso 7 — Informá el pago:
-  - Urgente: "El turno está reservado ✅ Transferí $[monto] al alias carmelo.palermo y mandanos el comprobante."
-  - Normal: "El turno está reservado ✅ Transferí $[50%] al alias carmelo.palermo. El resto lo abonás al retirar."
+Paso 6 — Cuando el cliente confirme → llamá a la función crear_turno INMEDIATAMENTE (incluí telefono_cliente si lo tenés). NO esperes ningún comprobante para crear el turno. El turno se registra en el momento que el cliente dice "sí".
+Paso 7 — Después de que crear_turno se ejecute, informá el pago:
+  - Urgente: "¡Turno registrado! ✅ Para completar la reserva transferí $[monto] al alias carmelo.palermo y mandanos el comprobante."
+  - Normal: "¡Turno registrado! ✅ Para completar la reserva transferí $[50%] al alias carmelo.palermo. El resto lo abonás al retirar."
 
-IMPORTANTE: Llamá a crear_turno SOLO cuando el cliente confirmó explícitamente.
+IMPORTANTE: El orden es SIEMPRE: 1) cliente confirma → 2) llamás a crear_turno → 3) pedís el pago. NUNCA pidas el comprobante antes de registrar el turno.
 
 ---
 
