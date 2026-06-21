@@ -2,6 +2,7 @@ import os
 import json
 import threading
 import time
+import requests as req_lib
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client as TwilioClient
@@ -12,6 +13,20 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 conversation_history = {}
+
+BASE_GITHUB = "https://raw.githubusercontent.com/carlosalegre203-oss/whatsapp-bot/main/medidas/"
+INSTRUCTIVO_MEDIDAS = [
+    BASE_GITHUB + "medida_1_.jpg",
+    BASE_GITHUB + "medida_2.jpg",
+    BASE_GITHUB + "medida_3.jpg",
+    BASE_GITHUB + "medida_4.jpg",
+    BASE_GITHUB + "medida_5.jpg",
+    BASE_GITHUB + "medida_6.jpg",
+    BASE_GITHUB + "medida_7.jpg",
+    BASE_GITHUB + "largo_de_pie.jpg",
+    BASE_GITHUB + "altura_.jpg",
+    BASE_GITHUB + "guia_10.jpg",
+]
 
 # ─────────────────────────────────────────
 # AIRTABLE
@@ -29,8 +44,6 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
         api   = Api(api_token)
         table = api.table(base_id, table_name)
 
-        # Si el staff agendó a un cliente del local, usar el teléfono del cliente
-        # Si el cliente se agendó solo, usar el teléfono del chat
         tel_notificacion = telefono_cliente if telefono_cliente else telefono_chat
 
         record = table.create({
@@ -50,6 +63,105 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
     except Exception as e:
         print(f"Error Airtable: {e}")
         return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────
+# ENVIAR INSTRUCTIVO DE MEDIDAS POR WHATSAPP
+# ─────────────────────────────────────────
+def enviar_instructivo(telefono_destino):
+    try:
+        twilio = TwilioClient(
+            os.environ.get("TWILIO_ACCOUNT_SID"),
+            os.environ.get("TWILIO_AUTH_TOKEN")
+        )
+        whatsapp_from = os.environ.get("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+        to = telefono_destino if telefono_destino.startswith("whatsapp:") else f"whatsapp:{telefono_destino}"
+
+        for url in INSTRUCTIVO_MEDIDAS:
+            twilio.messages.create(from_=whatsapp_from, to=to, media_url=[url])
+
+        print(f"📏 Instructivo de medidas enviado a {telefono_destino}")
+        return {"ok": True}
+    except Exception as e:
+        print(f"Error enviando instructivo: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────
+# GUARDAR FOTOS EN AIRTABLE
+# Descarga desde Twilio con auth y sube directo a Airtable
+# ─────────────────────────────────────────
+def guardar_fotos_airtable(telefono, media_urls):
+    api_token    = os.environ.get("AIRTABLE_API_TOKEN")
+    base_id      = os.environ.get("AIRTABLE_BASE_ID")
+    twilio_sid   = os.environ.get("TWILIO_ACCOUNT_SID")
+    twilio_token = os.environ.get("TWILIO_AUTH_TOKEN")
+
+    if not api_token or not base_id:
+        return False, "error"
+
+    try:
+        # Descargar imágenes desde Twilio (requieren autenticación)
+        imagenes = []
+        for url in media_urls:
+            r = req_lib.get(url, auth=(twilio_sid, twilio_token), timeout=15)
+            if r.ok:
+                content_type = r.headers.get("Content-Type", "image/jpeg")
+                imagenes.append((r.content, content_type))
+            else:
+                print(f"Error descargando imagen de Twilio: {r.status_code}")
+
+        if not imagenes:
+            return False, "error"
+
+        api = Api(api_token)
+
+        # Determinar destino: turno activo o tabla Medidas
+        turnos_table = api.table(base_id, os.environ.get("AIRTABLE_TABLE_NAME", "Turnos"))
+        turnos = turnos_table.all(
+            formula=f"AND({{Teléfono}} = '{telefono}', OR({{Estado}} = 'Pendiente', {{Estado}} = 'En taller'))"
+        )
+
+        if turnos:
+            record_id  = turnos[0]["id"]
+            table_name = os.environ.get("AIRTABLE_TABLE_NAME", "Turnos")
+            field_name = "Foto"
+            destino    = "compostura"
+        else:
+            medidas_table = api.table(base_id, os.environ.get("AIRTABLE_MEDIDAS_TABLE", "Medidas"))
+            registros = medidas_table.all(formula=f"{{Teléfono}} = '{telefono}'")
+            if registros:
+                record_id = registros[0]["id"]
+            else:
+                nuevo = medidas_table.create({"Teléfono": telefono})
+                record_id = nuevo["id"]
+            table_name = os.environ.get("AIRTABLE_MEDIDAS_TABLE", "Medidas")
+            field_name = "Fotos"
+            destino    = "medidas"
+
+        # Subir cada imagen a Airtable usando su API de adjuntos
+        upload_url = f"https://content.airtable.com/v0/{base_id}/{record_id}/uploadAttachment"
+        headers = {"Authorization": f"Bearer {api_token}"}
+
+        for i, (img_bytes, content_type) in enumerate(imagenes):
+            ext      = "jpg" if "jpeg" in content_type else content_type.split("/")[-1]
+            filename = f"foto_{i + 1}.{ext}"
+            resp = req_lib.post(
+                upload_url,
+                headers=headers,
+                files={"file": (filename, img_bytes, content_type)},
+                data={"fieldName": field_name},
+                timeout=30
+            )
+            if not resp.ok:
+                print(f"Error subiendo foto a Airtable: {resp.status_code} {resp.text}")
+
+        print(f"📸 Fotos guardadas en {destino} para {telefono}")
+        return True, destino
+
+    except Exception as e:
+        print(f"Error guardando fotos: {e}")
+        return False, "error"
 
 
 # ─────────────────────────────────────────
@@ -93,6 +205,22 @@ TOOLS = [
                     }
                 },
                 "required": ["nombre_cliente", "servicio", "fecha", "hora", "es_urgente"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enviar_instructivo_medidas",
+            "description": (
+                "Envía al cliente las fotos del instructivo de medidas para fabricar botas nuevas a medida. "
+                "Llamar cuando el cliente quiere botas nuevas y necesita saber cómo tomarse las medidas, "
+                "o cuando pide el instructivo o las fotos de medidas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         }
     }
@@ -220,7 +348,7 @@ Preguntas en orden natural:
 4. ¿Estás en edad de crecimiento?
 5. ¿Textura preferida: suave / intermedio / grueso?
 
-Para clientes remotos: enviá el instructivo de medidas.
+Para tomar las medidas: llamá a la función enviar_instructivo_medidas para enviarle las fotos con el instructivo completo. Avisale al cliente que le vas a mandar las fotos ahora.
 
 ---
 
@@ -241,6 +369,7 @@ REGLAS CRÍTICAS
 4. Siempre dá la dirección completa cuando te la pidan.
 5. No inventés información.
 6. NUNCA llamés a crear_turno sin tener nombre, servicio, fecha y hora confirmados por el cliente.
+7. Cuando el cliente quiere botas nuevas y necesita tomarse las medidas → llamá a enviar_instructivo_medidas.
 """
 
 
@@ -270,14 +399,15 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
         )
 
         message = response.choices[0].message
+        assistant_message = None
 
         if message.tool_calls:
             tool_call = message.tool_calls[0]
+            tool_name = tool_call.function.name
 
-            if tool_call.function.name == "crear_turno":
+            if tool_name == "crear_turno":
                 args = json.loads(tool_call.function.arguments)
                 print(f"📅 Creando turno: {args}")
-
                 result = crear_turno_airtable(
                     nombre=args["nombre_cliente"],
                     telefono_chat=user_phone,
@@ -288,24 +418,31 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                     telefono_cliente=args.get("telefono_cliente")
                 )
 
-                conversation_history[user_phone].append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [tool_call.model_dump()]
-                })
-                conversation_history[user_phone].append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": json.dumps(result)
-                })
+            elif tool_name == "enviar_instructivo_medidas":
+                print(f"📏 Enviando instructivo a {user_phone}")
+                result = enviar_instructivo(user_phone)
 
-                final = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_phone],
-                    max_tokens=400,
-                    temperature=0.7
-                )
-                assistant_message = final.choices[0].message.content
+            else:
+                result = {"ok": False, "error": "función desconocida"}
+
+            conversation_history[user_phone].append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [tool_call.model_dump()]
+            })
+            conversation_history[user_phone].append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "content": json.dumps(result)
+            })
+
+            final = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_phone],
+                max_tokens=400,
+                temperature=0.7
+            )
+            assistant_message = final.choices[0].message.content
 
         else:
             assistant_message = message.content
@@ -364,55 +501,7 @@ def notificar():
 
 
 # ─────────────────────────────────────────
-# GUARDAR FOTOS EN AIRTABLE
-# Lógica: si tiene turno pendiente → va al turno (compostura)
-#         si no → va a la tabla Medidas (botas nuevas)
-# ─────────────────────────────────────────
-def guardar_fotos_airtable(telefono, media_urls):
-    api_token  = os.environ.get("AIRTABLE_API_TOKEN")
-    base_id    = os.environ.get("AIRTABLE_BASE_ID")
-
-    if not api_token or not base_id:
-        return False, "medidas"
-
-    attachments = [{"url": url} for url in media_urls]
-
-    try:
-        api = Api(api_token)
-
-        # 1. Buscar turno de compostura pendiente para este teléfono
-        turnos_table = api.table(base_id, os.environ.get("AIRTABLE_TABLE_NAME", "Turnos"))
-        turnos = turnos_table.all(formula=f"AND({{Teléfono}} = '{telefono}', OR({{Estado}} = 'Pendiente', {{Estado}} = 'En taller'))")
-
-        if turnos:
-            # Hay una compostura activa → foto va al turno
-            record_id = turnos[0]["id"]
-            fotos_actuales = turnos[0]["fields"].get("Foto", [])
-            turnos_table.update(record_id, {"Foto": fotos_actuales + attachments})
-            print(f"📸 Foto guardada en turno {record_id} para {telefono}")
-            return True, "compostura"
-
-        # 2. No hay turno → va a tabla Medidas (botas nuevas)
-        medidas_table = api.table(base_id, os.environ.get("AIRTABLE_MEDIDAS_TABLE", "Medidas"))
-        registros = medidas_table.all(formula=f"{{Teléfono}} = '{telefono}'")
-
-        if registros:
-            record_id = registros[0]["id"]
-            fotos_actuales = registros[0]["fields"].get("Fotos", [])
-            medidas_table.update(record_id, {"Fotos": fotos_actuales + attachments})
-        else:
-            medidas_table.create({"Teléfono": telefono, "Fotos": attachments})
-
-        print(f"📸 Foto guardada en Medidas para {telefono}")
-        return True, "medidas"
-
-    except Exception as e:
-        print(f"Error guardando fotos: {e}")
-        return False, "error"
-
-
-# ─────────────────────────────────────────
-# RUTAS
+# WEBHOOK PRINCIPAL
 # ─────────────────────────────────────────
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -422,7 +511,6 @@ def webhook():
 
     print(f"Mensaje de {from_number}: {incoming_msg} | Fotos: {num_media}")
 
-    # ── El cliente mandó fotos ──
     if num_media > 0:
         media_urls = [
             request.values.get(f"MediaUrl{i}")
@@ -457,11 +545,8 @@ def health():
 
 # ─────────────────────────────────────────
 # POLLING: detecta turnos con Estado=Lista
-# y envía WhatsApp de notificación
 # ─────────────────────────────────────────
 def notificar_turnos_listos():
-    """Corre en background cada 5 minutos. Busca turnos con Estado=Lista
-    y Notificado=False, envía WhatsApp al cliente y marca Notificado=True."""
     api_token = os.environ.get("AIRTABLE_API_TOKEN")
     base_id   = os.environ.get("AIRTABLE_BASE_ID")
 
@@ -496,7 +581,6 @@ def notificar_turnos_listos():
                 print(f"⚠️  Turno {record['id']} sin teléfono, saltando")
                 continue
 
-            # Marcar como notificado ANTES de enviar (evita duplicados si falla)
             table.update(record["id"], {"Notificado": True})
 
             msg = (
@@ -514,13 +598,11 @@ def notificar_turnos_listos():
 
 
 def polling_loop():
-    """Thread que corre el polling cada 5 minutos indefinidamente."""
     while True:
-        time.sleep(300)  # 5 minutos
+        time.sleep(300)
         notificar_turnos_listos()
 
 
-# Iniciar thread al cargar el módulo (compatible con gunicorn)
 _polling_thread = threading.Thread(target=polling_loop, daemon=True)
 _polling_thread.start()
 print("🔄 Polling de notificaciones iniciado (cada 5 min)")
