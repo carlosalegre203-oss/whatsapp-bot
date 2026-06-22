@@ -66,6 +66,49 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
 
 
 # ─────────────────────────────────────────
+# ENVIAR FOTOS DEL CATÁLOGO DE BOTAS
+# ─────────────────────────────────────────
+def enviar_catalogo_botas(telefono_destino, categoria=None):
+    try:
+        api_token = os.environ.get("AIRTABLE_API_TOKEN")
+        base_id   = os.environ.get("AIRTABLE_BASE_ID")
+        api = Api(api_token)
+        tabla = api.table(base_id, "Catálogo de Botas")
+
+        if categoria:
+            registros = tabla.all(formula=f"{{Categoría}} = '{categoria}'")
+        else:
+            registros = tabla.all()
+
+        if not registros:
+            return {"ok": False, "error": "Sin registros"}
+
+        twilio = TwilioClient(
+            os.environ.get("TWILIO_ACCOUNT_SID"),
+            os.environ.get("TWILIO_AUTH_TOKEN")
+        )
+        whatsapp_from = os.environ.get("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+        to = telefono_destino if telefono_destino.startswith("whatsapp:") else f"whatsapp:{telefono_destino}"
+
+        for r in registros:
+            f = r["fields"]
+            nombre  = f.get("Nombre", "Modelo")
+            precio  = f.get("Precio", "")
+            foto_url = f.get("Foto URL", "")
+            if not foto_url:
+                continue
+            caption = f"🥾 *{nombre}*\n💰 ${precio:,.0f}" if isinstance(precio, (int, float)) else f"🥾 *{nombre}*\n💰 {precio}"
+            twilio.messages.create(from_=whatsapp_from, to=to, body=caption, media_url=[foto_url])
+
+        print(f"📸 Catálogo enviado a {telefono_destino} ({len(registros)} modelos)")
+        return {"ok": True, "enviados": len(registros)}
+
+    except Exception as e:
+        print(f"Error enviando catálogo: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────
 # ENVIAR INSTRUCTIVO DE MEDIDAS POR WHATSAPP
 # ─────────────────────────────────────────
 def enviar_instructivo(telefono_destino):
@@ -205,6 +248,27 @@ TOOLS = [
                     }
                 },
                 "required": ["nombre_cliente", "servicio", "fecha", "hora", "es_urgente"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "enviar_catalogo_botas",
+            "description": (
+                "Envía al cliente las fotos de los modelos de botas disponibles con nombre y precio. "
+                "Llamar cuando el cliente pida ver modelos, fotos de botas, o quiera saber qué modelos tienen. "
+                "Si el cliente especifica una categoría (Mujer, Hombre, Militar, Unisex), pasarla como parámetro."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "categoria": {
+                        "type": "string",
+                        "description": "Categoría a filtrar: Mujer, Hombre, Militar, Unisex. Omitir para mostrar todos los modelos."
+                    }
+                },
+                "required": []
             }
         }
     },
@@ -358,7 +422,9 @@ Cuando el cliente pregunta por botas nuevas o precios, respondé con esto:
 ¿Querés ver los modelos disponibles?"
 
 PASO 2 — MOSTRAR MODELOS (solo si el cliente quiere seguir)
-Si el cliente dice que sí quiere ver modelos, presentalos de a uno o en lista:
+Si el cliente dice que sí quiere ver modelos, llamá a enviar_catalogo_botas para enviarle las fotos con nombre y precio. Si mencionó una categoría específica (Mujer, Hombre, Militar, Unisex), pasala como parámetro. Avisale que le vas a mandar las fotos ahora.
+
+Referencia de modelos disponibles:
 
 Modelos disponibles:
 1. Clásico Marrón Militar → $480.000
@@ -454,6 +520,12 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                     es_urgente=args.get("es_urgente", False),
                     telefono_cliente=args.get("telefono_cliente")
                 )
+
+            elif tool_name == "enviar_catalogo_botas":
+                args = json.loads(tool_call.function.arguments)
+                categoria = args.get("categoria")
+                print(f"📸 Enviando catálogo a {user_phone} (categoría: {categoria})")
+                result = enviar_catalogo_botas(user_phone, categoria)
 
             elif tool_name == "enviar_instructivo_medidas":
                 print(f"📏 Enviando instructivo a {user_phone}")
