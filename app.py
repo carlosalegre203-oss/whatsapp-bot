@@ -23,8 +23,8 @@ INSTRUCTIVO_MEDIDAS = [
     BASE_GITHUB + "medida_5.jpg",
     BASE_GITHUB + "medida_6.jpg",
     BASE_GITHUB + "medida_7.jpg",
-    BASE_GITHUB + "largo_de_pie.jpg",
     BASE_GITHUB + "altura_.jpg",
+    BASE_GITHUB + "largo_de_pie.jpg",
     BASE_GITHUB + "guia_10.jpg",
 ]
 
