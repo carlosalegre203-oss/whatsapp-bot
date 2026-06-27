@@ -31,7 +31,12 @@ INSTRUCTIVO_MEDIDAS = [
 # ─────────────────────────────────────────
 # AIRTABLE
 # ─────────────────────────────────────────
-def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgente=False, telefono_cliente=None):
+CODIGOS_STAFF = {
+    "LOCAL4045": "Palermo",
+    "LOCAL443":  "Alberti",
+}
+
+def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgente=False, telefono_cliente=None, local=None):
     api_token  = os.environ.get("AIRTABLE_API_TOKEN")
     base_id    = os.environ.get("AIRTABLE_BASE_ID")
     table_name = os.environ.get("AIRTABLE_TABLE_NAME", "Turnos")
@@ -46,7 +51,7 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
 
         tel_notificacion = telefono_cliente if telefono_cliente else telefono_chat
 
-        record = table.create({
+        fields = {
             "Cliente":  nombre,
             "Teléfono": tel_notificacion,
             "Servicio": servicio,
@@ -55,7 +60,11 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
             "Urgente":  es_urgente,
             "Estado":   "Pendiente",
             "Pago":     "100% al reservar" if es_urgente else "50% al reservar",
-        })
+        }
+        if local:
+            fields["Local"] = local
+
+        record = table.create(fields)
 
         print(f"✅ Turno creado en Airtable: {record['id']}")
         return {"ok": True, "record_id": record["id"]}
@@ -245,6 +254,10 @@ TOOLS = [
                     "telefono_cliente": {
                         "type": "string",
                         "description": "Número de WhatsApp del cliente (solo cuando el staff agenda a un cliente del local). Formato: +549XXXXXXXXXX. Si el cliente se está agendando solo, omitir este campo."
+                    },
+                    "local": {
+                        "type": "string",
+                        "description": "Local de origen del turno. 'Palermo' si el staff usó LOCAL4045, 'Alberti' si usó LOCAL443. Omitir si el cliente se agendó solo."
                     }
                 },
                 "required": ["nombre_cliente", "servicio", "fecha", "hora", "es_urgente"]
@@ -498,6 +511,23 @@ REGLAS CRÍTICAS DE BOTAS NUEVAS:
 
 ---
 
+MODO STAFF — CARGA DESDE EL LOCAL
+
+Si el mensaje arranca con un código de local, estás hablando con el staff de Carmelo, no con un cliente:
+
+• LOCAL4045 → Local Palermo (Dorrego 4045)
+• LOCAL443 → Local Alberti (Cataneo 443)
+
+En modo staff:
+- No hacés las preguntas de cliente
+- El staff te pasa los datos directamente: nombre, servicio, fecha, hora, urgente o no, y el teléfono del cliente si lo tienen
+- Registrás el turno con esos datos y el campo "local" correspondiente (Palermo o Alberti)
+- Confirmás el registro: "✅ Turno registrado en Palermo / Alberti para [Nombre] — [servicio] el [fecha] a las [hora]."
+
+Ejemplo de carga: "LOCAL4045 - María López, cambio de cierre par, jueves 10hs, normal, +5491155554444"
+
+---
+
 PERSONALIDAD Y TONO
 
 - Idioma: Detectá el idioma y respondé siempre en ese idioma.
@@ -561,7 +591,8 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                     fecha=args["fecha"],
                     hora=args["hora"],
                     es_urgente=args.get("es_urgente", False),
-                    telefono_cliente=args.get("telefono_cliente")
+                    telefono_cliente=args.get("telefono_cliente"),
+                    local=args.get("local")
                 )
 
             elif tool_name == "enviar_catalogo_botas":
