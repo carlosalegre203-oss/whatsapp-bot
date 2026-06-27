@@ -36,7 +36,7 @@ CODIGOS_STAFF = {
     "LOCAL443":  "Alberti",
 }
 
-def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgente=False, telefono_cliente=None, local=None):
+def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgente=False, telefono_cliente=None, local=None, pago=None):
     api_token  = os.environ.get("AIRTABLE_API_TOKEN")
     base_id    = os.environ.get("AIRTABLE_BASE_ID")
     table_name = os.environ.get("AIRTABLE_TABLE_NAME", "Turnos")
@@ -59,7 +59,7 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
             "Hora":     hora,
             "Urgente":  es_urgente,
             "Estado":   "Pendiente",
-            "Pago":     "100% al reservar" if es_urgente else "50% al reservar",
+            "Pago":     pago if pago else ("100% al reservar" if es_urgente else "50% al reservar"),
         }
         if local:
             fields["Local"] = local
@@ -258,6 +258,10 @@ TOOLS = [
                     "local": {
                         "type": "string",
                         "description": "Local de origen del turno. 'Palermo' si el staff usó LOCAL4045, 'Alberti' si usó LOCAL443. Omitir si el cliente se agendó solo."
+                    },
+                    "pago": {
+                        "type": "string",
+                        "description": "Modalidad de pago. Solo en modo staff: 'Sin cargo', 'Efectivo en local', '50% al reservar', '100% al reservar'. Omitir si el cliente se agendó solo (se calcula automáticamente)."
                     }
                 },
                 "required": ["nombre_cliente", "servicio", "fecha", "hora", "es_urgente"]
@@ -520,11 +524,23 @@ Si el mensaje arranca con un código de local, estás hablando con el staff de C
 
 En modo staff:
 - No hacés las preguntas de cliente
-- El staff te pasa los datos directamente: nombre, servicio, fecha, hora, urgente o no, y el teléfono del cliente si lo tienen
+- No pedís comprobante de pago nunca
+- El staff te pasa los datos directamente: nombre, servicio, fecha, hora, modalidad de pago y el teléfono del cliente si lo tienen
 - Registrás el turno con esos datos y el campo "local" correspondiente (Palermo o Alberti)
-- Confirmás el registro: "✅ Turno registrado en Palermo / Alberti para [Nombre] — [servicio] el [fecha] a las [hora]."
+- Confirmás el registro: "✅ Turno registrado en [Local] para [Nombre] — [servicio] el [fecha] a las [hora]."
 
-Ejemplo de carga: "LOCAL4045 - María López, cambio de cierre par, jueves 10hs, normal, +5491155554444"
+MODALIDADES DE PAGO EN MODO STAFF:
+- "sin cargo" → registrar Pago: "Sin cargo"
+- "efectivo" → registrar Pago: "Efectivo en local"
+- "transferencia" o "normal" → registrar Pago: "50% al reservar"
+- "urgente" → registrar Pago: "100% al reservar" y Urgente: true
+
+En modo staff NUNCA pedís comprobante ni transferencia — el pago se maneja en el local.
+
+Ejemplos de carga:
+"LOCAL4045 - María López, cambio de cierre par, jueves 10hs, sin cargo, +5491155554444"
+"LOCAL4045 - Juan Pérez, cambio de fondo, viernes 11hs, efectivo, +5491166667777"
+"LOCAL443 - Ana García, lustrado, lunes 10hs, urgente, +5491188889999"
 
 ---
 
@@ -592,7 +608,8 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                     hora=args["hora"],
                     es_urgente=args.get("es_urgente", False),
                     telefono_cliente=args.get("telefono_cliente"),
-                    local=args.get("local")
+                    local=args.get("local"),
+                    pago=args.get("pago")
                 )
 
             elif tool_name == "enviar_catalogo_botas":
