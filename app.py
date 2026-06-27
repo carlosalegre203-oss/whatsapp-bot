@@ -13,6 +13,7 @@ app = Flask(__name__)
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
 conversation_history = {}
+esperando_foto = {}  # phone → record_id: staff esperando adjuntar foto al turno recién creado
 
 BASE_GITHUB = "https://raw.githubusercontent.com/carlosalegre203-oss/whatsapp-bot/main/medidas/"
 INSTRUCTIVO_MEDIDAS = [
@@ -167,6 +168,24 @@ def guardar_fotos_airtable(telefono, media_urls):
             return False, "error"
 
         api = Api(api_token)
+
+        # Si el staff acaba de registrar un turno, adjuntar al turno recién creado
+        if telefono in esperando_foto:
+            record_id  = esperando_foto.pop(telefono)
+            table_name = os.environ.get("AIRTABLE_TABLE_NAME", "Turnos")
+            field_name = "Foto"
+            upload_url = f"https://content.airtable.com/v0/{base_id}/{record_id}/uploadAttachment"
+            headers_at = {"Authorization": f"Bearer {api_token}"}
+            for i, (img_bytes, content_type) in enumerate(imagenes):
+                ext      = "jpg" if "jpeg" in content_type else content_type.split("/")[-1]
+                filename = f"foto_{i + 1}.{ext}"
+                resp = req_lib.post(upload_url, headers=headers_at,
+                                    files={"file": (filename, img_bytes, content_type)},
+                                    data={"fieldName": field_name}, timeout=30)
+                if not resp.ok:
+                    print(f"Error subiendo foto a Airtable: {resp.status_code} {resp.text}")
+            print(f"📸 Foto staff adjuntada al turno {record_id}")
+            return True, "compostura"
 
         # Determinar destino: turno activo o tabla Medidas
         turnos_table = api.table(base_id, os.environ.get("AIRTABLE_TABLE_NAME", "Turnos"))
@@ -526,8 +545,9 @@ En modo staff:
 - No hacés las preguntas de cliente
 - No pedís comprobante de pago nunca
 - El staff te pasa los datos directamente: nombre, servicio, fecha, hora, modalidad de pago y el teléfono del cliente si lo tienen
+- Si el staff no tiene el teléfono del cliente, usá "1111" como número de teléfono
 - Registrás el turno con esos datos y el campo "local" correspondiente (Palermo o Alberti)
-- Confirmás el registro: "✅ Turno registrado en [Local] para [Nombre] — [servicio] el [fecha] a las [hora]."
+- Después de registrar el turno, pedí la foto SIEMPRE: "✅ Turno registrado. ¿Tenés foto de la bota? Mandamela así la adjunto a la ficha 📸"
 
 MODALIDADES DE PAGO EN MODO STAFF:
 - "sin cargo" → registrar Pago: "Sin cargo"
@@ -611,6 +631,9 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                     local=args.get("local"),
                     pago=args.get("pago")
                 )
+                # Si es modo staff, quedar esperando foto para adjuntar al turno
+                if result.get("ok") and args.get("local"):
+                    esperando_foto[user_phone] = result["record_id"]
 
             elif tool_name == "enviar_catalogo_botas":
                 args = json.loads(tool_call.function.arguments)
