@@ -35,6 +35,7 @@ INSTRUCTIVO_MEDIDAS = [
 CODIGOS_STAFF = {
     "LOCAL4045": "Palermo",
     "LOCAL443":  "Alberti",
+    "LOCAL1980":  "Producción",
 }
 
 def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgente=False, telefono_cliente=None, local=None, pago=None):
@@ -725,6 +726,7 @@ Si el mensaje arranca con un código de local, estás hablando con el staff de C
 
 • LOCAL4045 → Local Palermo (Dorrego 4045)
 • LOCAL443 → Local Alberti (Cataneo 443)
+• LOCAL1980 → Código exclusivo para cargar botas ya en producción (igual que LOCAL4045 PROD pero sin escribir PROD)
 
 En modo staff NUNCA pedís comprobante ni transferencia — el pago se maneja en el local.
 
@@ -804,11 +806,17 @@ Después de registrar, confirmá:
 🔨 Etapa actual: [Etapa]
 [Notas si las hay]"
 
-Ejemplos:
+Ejemplos con LOCAL4045 PROD o LOCAL443 PROD:
 "LOCAL4045 PROD - Bota de Gala, Bota Clásica, hasta el armado"
 "LOCAL4045 PROD - Roberto Sánchez, Bota de Campo, hasta el aparado, cuero intermedio grueso"
-"LOCAL4045 PROD - Carmen Gómez, Algo Clásico, hasta terminaciones, lista para el jueves, +5491133334444"
-"LOCAL443 PROD - Sin nombre, Bota Clásica, hasta el corte, 3 pares pendientes"
+"LOCAL443 PROD - Carmen Gómez, Algo Clásico, hasta terminaciones, lista para el jueves"
+
+Con LOCAL1980 (no hace falta escribir PROD — ya lo sabe):
+"LOCAL1980 - Sin nombre, Bota de Gala, hasta el armado"
+"LOCAL1980 - Roberto Sánchez, Bota de Campo, hasta el aparado, cuero intermedio grueso"
+"LOCAL1980 - Carmen Gómez, Algo Clásico, hasta terminaciones"
+
+LOCAL1980 puede recibir varias botas juntas, una por línea — registrá todas.
 
 Cuando el staff diga "bota de gala" o similar sin aclarar nombre, usá "Sin nombre" y anotá el modelo en notas.
 
