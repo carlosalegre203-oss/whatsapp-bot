@@ -134,31 +134,32 @@ def registrar_produccion_airtable(nombre_cliente, modelo, etapa_actual, local=No
 
         # Crear en Pedidos con estado "En producción"
         pedidos_table = api.table(base_id, "Pedidos")
-        tel = telefono_cliente if telefono_cliente else "1111"
         pedido_fields = {
             "Cliente":  nombre_cliente,
-            "Teléfono": tel,
             "Modelo":   modelo,
             "Estado":   "En producción",
         }
-        if local:
-            pedido_fields["Local"] = local
-        if notas:
-            pedido_fields["Notas"] = notas
-        pedido = pedidos_table.create(pedido_fields)
+        tel = telefono_cliente if telefono_cliente else "1111"
+        try:
+            pedido_fields["Teléfono"] = tel
+            pedido = pedidos_table.create(pedido_fields)
+        except Exception:
+            # Si Teléfono no existe en Pedidos, crear sin ese campo
+            pedido_fields.pop("Teléfono", None)
+            pedido = pedidos_table.create(pedido_fields)
 
         # Crear en Producción con etapa actual
         prod_table = api.table(base_id, "Produccion")
-        prod_fields = {
-            "Cliente":       nombre_cliente,
-            "Modelo":        modelo,
-            "Etapa actual":  etapa_actual,
-            "Estado":        "En curso",
-        }
+        detalle_parts = [f"{nombre_cliente} — {modelo}"]
         if local:
-            prod_fields["Local"] = local
+            detalle_parts.append(f"Local: {local}")
         if notas:
-            prod_fields["Notas"] = notas
+            detalle_parts.append(notas)
+        prod_fields = {
+            "Detalle": " | ".join(detalle_parts),
+            "Etapa":   etapa_actual,
+            "Pedido":  [{"id": pedido["id"]}],
+        }
         prod = prod_table.create(prod_fields)
 
         print(f"✅ Bota en producción registrada: Pedido {pedido['id']} / Prod {prod['id']}")
