@@ -119,6 +119,56 @@ def crear_pedido_airtable(nombre, telefono_chat, modelo, textura, modalidad, pre
 
 
 # ─────────────────────────────────────────
+# REGISTRAR BOTA EN PRODUCCIÓN (ya en curso)
+# ─────────────────────────────────────────
+def registrar_produccion_airtable(nombre_cliente, modelo, etapa_actual, local=None, telefono_cliente=None, notas=None):
+    api_token = os.environ.get("AIRTABLE_API_TOKEN")
+    base_id   = os.environ.get("AIRTABLE_BASE_ID")
+
+    if not api_token or not base_id:
+        return {"ok": False, "error": "Airtable no configurado"}
+
+    try:
+        api = Api(api_token)
+
+        # Crear en Pedidos con estado "En producción"
+        pedidos_table = api.table(base_id, "Pedidos")
+        tel = telefono_cliente if telefono_cliente else "1111"
+        pedido_fields = {
+            "Cliente":  nombre_cliente,
+            "Teléfono": tel,
+            "Modelo":   modelo,
+            "Estado":   "En producción",
+        }
+        if local:
+            pedido_fields["Local"] = local
+        if notas:
+            pedido_fields["Notas"] = notas
+        pedido = pedidos_table.create(pedido_fields)
+
+        # Crear en Producción con etapa actual
+        prod_table = api.table(base_id, "Produccion")
+        prod_fields = {
+            "Cliente":       nombre_cliente,
+            "Modelo":        modelo,
+            "Etapa actual":  etapa_actual,
+            "Estado":        "En curso",
+        }
+        if local:
+            prod_fields["Local"] = local
+        if notas:
+            prod_fields["Notas"] = notas
+        prod = prod_table.create(prod_fields)
+
+        print(f"✅ Bota en producción registrada: Pedido {pedido['id']} / Prod {prod['id']}")
+        return {"ok": True, "pedido_id": pedido["id"], "prod_id": prod["id"]}
+
+    except Exception as e:
+        print(f"Error registrando producción: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────
 # ENVIAR FOTOS DEL CATÁLOGO DE BOTAS
 # ─────────────────────────────────────────
 def enviar_catalogo_botas(telefono_destino, categoria=None):
@@ -396,6 +446,47 @@ TOOLS = [
                     }
                 },
                 "required": ["nombre_cliente", "modelo", "textura", "modalidad", "precio_total"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "registrar_produccion",
+            "description": (
+                "Registra una bota que ya está en producción con su etapa actual. "
+                "Solo disponible en modo staff. Crea registro en Pedidos (Estado=En producción) "
+                "y en Producción con la etapa en que se encuentra."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre_cliente": {
+                        "type": "string",
+                        "description": "Nombre del cliente dueño de la bota"
+                    },
+                    "modelo": {
+                        "type": "string",
+                        "description": "Modelo de bota. Ej: 'Bota Clásica', 'Bota de Gala', 'Algo Clásico', 'Bota de Campo'"
+                    },
+                    "etapa_actual": {
+                        "type": "string",
+                        "description": "Etapa de producción en la que se encuentra. Valores: 'Corte', 'Aparado', 'Armado', 'Fondo', 'Terminaciones', 'Lista'"
+                    },
+                    "local": {
+                        "type": "string",
+                        "description": "'Palermo' o 'Alberti' según el código de local usado"
+                    },
+                    "telefono_cliente": {
+                        "type": "string",
+                        "description": "Teléfono del cliente si está disponible. Formato +549XXXXXXXXXX"
+                    },
+                    "notas": {
+                        "type": "string",
+                        "description": "Observaciones adicionales. Ej: 'cuero intermedio grueso', 'urgente para el 20'"
+                    }
+                },
+                "required": ["nombre_cliente", "modelo", "etapa_actual", "local"]
             }
         }
     },
@@ -690,6 +781,39 @@ Ejemplos pedido:
 
 ---
 
+STAFF — BOTAS YA EN PRODUCCIÓN
+
+El staff puede cargar botas que ya están siendo fabricadas y especificar hasta qué etapa llegaron.
+Se usa la palabra "PROD" después del código de local.
+
+ETAPAS DE PRODUCCIÓN (de menor a mayor avance):
+1. Corte — el cuero ya fue cortado
+2. Aparado — la caña y el empeine están cosidos
+3. Armado — la bota está sobre la horma
+4. Fondo — se pegó y cosió la suela
+5. Terminaciones — lustrado, herrajes, detalles finales
+6. Lista — terminada, esperando retiro
+
+El staff indica el nombre del cliente, el modelo y hasta qué etapa llegó. Podés recibir más datos como textura, observaciones o teléfono.
+Registrás con registrar_produccion. NO mandés instructivo de medidas.
+
+Después de registrar, confirmá:
+"✅ Bota registrada en producción:
+👤 [Nombre]
+👢 [Modelo]
+🔨 Etapa actual: [Etapa]
+[Notas si las hay]"
+
+Ejemplos:
+"LOCAL4045 PROD - Bota de Gala, Bota Clásica, hasta el armado"
+"LOCAL4045 PROD - Roberto Sánchez, Bota de Campo, hasta el aparado, cuero intermedio grueso"
+"LOCAL4045 PROD - Carmen Gómez, Algo Clásico, hasta terminaciones, lista para el jueves, +5491133334444"
+"LOCAL443 PROD - Sin nombre, Bota Clásica, hasta el corte, 3 pares pendientes"
+
+Cuando el staff diga "bota de gala" o similar sin aclarar nombre, usá "Sin nombre" y anotá el modelo en notas.
+
+---
+
 PERSONALIDAD Y TONO
 
 - Idioma: Detectá el idioma y respondé siempre en ese idioma.
@@ -773,6 +897,18 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                     precio_total=args["precio_total"],
                     telefono_cliente=args.get("telefono_cliente"),
                     local=args.get("local"),
+                    notas=args.get("notas"),
+                )
+
+            elif tool_name == "registrar_produccion":
+                args = json.loads(tool_call.function.arguments)
+                print(f"🔨 Registrando producción: {args}")
+                result = registrar_produccion_airtable(
+                    nombre_cliente=args["nombre_cliente"],
+                    modelo=args["modelo"],
+                    etapa_actual=args["etapa_actual"],
+                    local=args.get("local"),
+                    telefono_cliente=args.get("telefono_cliente"),
                     notas=args.get("notas"),
                 )
 
