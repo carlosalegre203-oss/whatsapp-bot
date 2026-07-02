@@ -78,7 +78,7 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
 # ─────────────────────────────────────────
 # CREAR PEDIDO EN AIRTABLE (botas nuevas)
 # ─────────────────────────────────────────
-def crear_pedido_airtable(nombre, telefono, modelo, textura, modalidad, precio_total, local=None):
+def crear_pedido_airtable(nombre, telefono_chat, modelo, textura, modalidad, precio_total, telefono_cliente=None, local=None, notas=None):
     api_token = os.environ.get("AIRTABLE_API_TOKEN")
     base_id   = os.environ.get("AIRTABLE_BASE_ID")
 
@@ -92,9 +92,11 @@ def crear_pedido_airtable(nombre, telefono, modelo, textura, modalidad, precio_t
         # Seña: 50% estándar, 100% express
         sena = precio_total if modalidad == "Express" else round(precio_total * 0.5)
 
+        tel = telefono_cliente if telefono_cliente else telefono_chat
+
         fields = {
             "Cliente":   nombre,
-            "Teléfono":  telefono,
+            "Teléfono":  tel,
             "Modelo":    modelo,
             "Textura":   textura,
             "Modalidad": modalidad,
@@ -104,6 +106,8 @@ def crear_pedido_airtable(nombre, telefono, modelo, textura, modalidad, precio_t
         }
         if local:
             fields["Local"] = local
+        if notas:
+            fields["Notas"] = notas
 
         record = table.create(fields)
         print(f"✅ Pedido creado en Airtable: {record['id']}")
@@ -378,9 +382,17 @@ TOOLS = [
                         "type": "number",
                         "description": "Precio total en pesos argentinos (número, sin signo $)"
                     },
+                    "telefono_cliente": {
+                        "type": "string",
+                        "description": "Teléfono del cliente. Formato +549XXXXXXXXXX. En modo staff, pasarlo si el staff lo tiene. Si no lo tiene, usar '1111'."
+                    },
                     "local": {
                         "type": "string",
                         "description": "Solo en modo staff: 'Palermo' o 'Alberti'. Omitir si el cliente se agendó solo."
+                    },
+                    "notas": {
+                        "type": "string",
+                        "description": "Observaciones adicionales del pedido. Ej: 'seña cobrada en efectivo', 'talla especial', 'pendiente de medidas'."
                     }
                 },
                 "required": ["nombre_cliente", "modelo", "textura", "modalidad", "precio_total"]
@@ -623,26 +635,58 @@ Si el mensaje arranca con un código de local, estás hablando con el staff de C
 • LOCAL4045 → Local Palermo (Dorrego 4045)
 • LOCAL443 → Local Alberti (Cataneo 443)
 
-En modo staff:
-- No hacés las preguntas de cliente
-- No pedís comprobante de pago nunca
-- El staff te pasa los datos directamente: nombre, servicio, fecha, hora, modalidad de pago y el teléfono del cliente si lo tienen
-- Si el staff no tiene el teléfono del cliente, usá "1111" como número de teléfono
-- Registrás el turno con esos datos y el campo "local" correspondiente (Palermo o Alberti)
-- Después de registrar el turno, pedí la foto SIEMPRE: "✅ Turno registrado. ¿Tenés foto de la bota? Mandamela así la adjunto a la ficha 📸"
-
-MODALIDADES DE PAGO EN MODO STAFF:
-- "sin cargo" → registrar Pago: "Sin cargo"
-- "efectivo" → registrar Pago: "Efectivo en local"
-- "transferencia" o "normal" → registrar Pago: "50% al reservar"
-- "urgente" → registrar Pago: "100% al reservar" y Urgente: true
-
 En modo staff NUNCA pedís comprobante ni transferencia — el pago se maneja en el local.
 
-Ejemplos de carga:
+---
+
+STAFF — COMPOSTURA (reparación)
+
+El staff pasa: nombre, servicio, fecha, hora, modalidad de pago y teléfono del cliente (si lo tienen).
+Si no tienen teléfono del cliente, usá "1111".
+Registrás con crear_turno y el campo local correspondiente.
+Después de registrar, pedí foto SIEMPRE: "✅ Turno registrado. ¿Tenés foto de la bota? Mandamela así la adjunto a la ficha 📸"
+
+MODALIDADES DE PAGO — COMPOSTURA:
+- "sin cargo" → Pago: "Sin cargo"
+- "efectivo" → Pago: "Efectivo en local"
+- "transferencia" o "normal" → Pago: "50% al reservar"
+- "urgente" → Pago: "100% al reservar" y Urgente: true
+
+Ejemplos compostura:
 "LOCAL4045 - María López, cambio de cierre par, jueves 10hs, sin cargo, +5491155554444"
 "LOCAL4045 - Juan Pérez, cambio de fondo, viernes 11hs, efectivo, +5491166667777"
 "LOCAL443 - Ana García, lustrado, lunes 10hs, urgente, +5491188889999"
+
+---
+
+STAFF — PEDIDO DE BOTAS NUEVAS
+
+El staff puede registrar encargos de botas nuevas con la palabra "PEDIDO" después del código de local.
+El staff pasa: nombre del cliente, modelo, textura, modalidad (Express o Estándar) y el teléfono del cliente (si lo tienen).
+Si no tienen teléfono, usá "1111".
+Podés también recibir notas adicionales (ej: "seña cobrada", "medidas pendientes", "talle especial").
+Registrás con crear_pedido. NO enviés el instructivo de medidas en modo staff (el cliente ya está en el local o ya tiene las medidas).
+Después de registrar, confirmá:
+"✅ Pedido registrado:
+👤 [Nombre]
+👢 [Modelo] — [Textura]
+⏱ [Modalidad] ([días] días)
+💰 Total: $[precio] | Seña: $[seña]
+[Notas si las hay]"
+
+MODALIDADES PEDIDO STAFF:
+- "express" → Modalidad: "Express", seña = 100% del precio
+- "estándar" o "normal" → Modalidad: "Estándar", seña = 50% del precio
+
+Precios de referencia para que el staff no tenga que calcular:
+- Algo Clásico: $520.000 (seña estándar $260.000)
+- Modelos con terminaciones: desde $540.000 hasta $650.000
+
+Ejemplos pedido:
+"LOCAL4045 PEDIDO - Lucía Ramos, Algo Clásico, Intermedio, Estándar, +5491122223333"
+"LOCAL4045 PEDIDO - Roberto Díaz, Modelo campo, Intermedio grueso, Express, +5491144445555, seña cobrada en efectivo"
+"LOCAL443 PEDIDO - Carmen Suárez, Algo Clásico, Suave, Estándar, sin teléfono, medidas pendientes de instructivo"
+"LOCAL4045 PEDIDO - pendientes" (para cargar pedidos que ya tenían antes de activar el sistema)
 
 ---
 
@@ -722,12 +766,14 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                 print(f"📦 Creando pedido: {args}")
                 result = crear_pedido_airtable(
                     nombre=args["nombre_cliente"],
-                    telefono=user_phone,
+                    telefono_chat=user_phone,
                     modelo=args["modelo"],
                     textura=args["textura"],
                     modalidad=args["modalidad"],
                     precio_total=args["precio_total"],
+                    telefono_cliente=args.get("telefono_cliente"),
                     local=args.get("local"),
+                    notas=args.get("notas"),
                 )
 
             elif tool_name == "enviar_catalogo_botas":
