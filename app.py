@@ -150,17 +150,28 @@ def registrar_produccion_airtable(nombre_cliente, modelo, etapa_actual, local=No
 
         # Crear en Producción con etapa actual
         prod_table = api.table(base_id, "Produccion")
-        detalle_parts = [f"{nombre_cliente} — {modelo}"]
+        detalle_parts = [f"{nombre_cliente} — {modelo} — Etapa: {etapa_actual}"]
         if local:
             detalle_parts.append(f"Local: {local}")
         if notas:
             detalle_parts.append(notas)
-        prod_fields = {
-            "Detalle": " | ".join(detalle_parts),
-            "Etapa":   etapa_actual,
-            "Pedido":  [{"id": pedido["id"]}],
-        }
-        prod = prod_table.create(prod_fields)
+        detalle_texto = " | ".join(detalle_parts)
+
+        # Intentar con todos los campos; si falla, caer a solo Detalle
+        try:
+            prod = prod_table.create({
+                "Detalle": detalle_texto,
+                "Etapa":   etapa_actual,
+                "Pedido":  [{"id": pedido["id"]}],
+            })
+        except Exception:
+            try:
+                prod = prod_table.create({
+                    "Detalle": detalle_texto,
+                    "Etapa":   etapa_actual,
+                })
+            except Exception:
+                prod = prod_table.create({"Detalle": detalle_texto})
 
         print(f"✅ Bota en producción registrada: Pedido {pedido['id']} / Prod {prod['id']}")
         return {"ok": True, "pedido_id": pedido["id"], "prod_id": prod["id"]}
