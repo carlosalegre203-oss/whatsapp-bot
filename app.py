@@ -461,7 +461,7 @@ TOOLS = [
                     },
                     "etapa_actual": {
                         "type": "string",
-                        "description": "Etapa de producción en la que se encuentra. Valores: 'Corte', 'Aparado', 'Armado', 'Fondo', 'Terminaciones', 'Lista'"
+                        "description": "Etapa de producción. Valores exactos: 'Corte', 'Seleccion de horma', 'Costura', 'Colocar fondos', 'Clavar tacos', 'Colocar cordones', 'Cueritos de broche', 'Chapita de marca', 'Catalonera', 'Empopiado de cana', 'Lustrado', 'Control de calidad'. Mapear lo que diga el staff al valor más cercano."
                     },
                     "local": {
                         "type": "string",
@@ -777,13 +777,26 @@ STAFF — BOTAS YA EN PRODUCCIÓN
 El staff puede cargar botas que ya están siendo fabricadas y especificar hasta qué etapa llegaron.
 Se usa la palabra "PROD" después del código de local.
 
-ETAPAS DE PRODUCCIÓN (de menor a mayor avance):
-1. Corte — el cuero ya fue cortado
-2. Aparado — la caña y el empeine están cosidos
-3. Armado — la bota está sobre la horma
-4. Fondo — se pegó y cosió la suela
-5. Terminaciones — lustrado, herrajes, detalles finales
-6. Lista — terminada, esperando retiro
+ETAPAS DE PRODUCCIÓN — valores exactos del sistema:
+1. Corte
+2. Seleccion de horma
+3. Costura
+4. Colocar fondos
+5. Clavar tacos
+6. Colocar cordones
+7. Cueritos de broche
+8. Chapita de marca
+9. Catalonera
+10. Empopiado de cana
+11. Lustrado
+12. Control de calidad
+
+Cuando el staff diga "hasta el armado" → usar "Seleccion de horma"
+Cuando diga "hasta el cosido" o "aparado" → usar "Costura"
+Cuando diga "hasta el fondo" → usar "Colocar fondos"
+Cuando diga "casi lista" o "terminaciones" → usar "Lustrado"
+Cuando diga "lista" → usar "Control de calidad"
+Para cualquier otra frase, mapear al valor más cercano de la lista.
 
 El staff indica el nombre del cliente, el modelo y hasta qué etapa llegó. Podés recibir más datos como textura, observaciones o teléfono.
 Registrás con registrar_produccion. NO mandés instructivo de medidas.
