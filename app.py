@@ -79,7 +79,7 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
 # ─────────────────────────────────────────
 # CREAR PEDIDO EN AIRTABLE (botas nuevas)
 # ─────────────────────────────────────────
-def crear_pedido_airtable(nombre, telefono_chat, modelo, textura, modalidad, precio_total, telefono_cliente=None, local=None, notas=None):
+def crear_pedido_airtable(nombre, telefono_chat, modelo, textura, modalidad, precio_total, telefono_cliente=None, local=None, notas=None, fecha_encargo=None, fecha_entrega=None):
     api_token = os.environ.get("AIRTABLE_API_TOKEN")
     base_id   = os.environ.get("AIRTABLE_BASE_ID")
 
@@ -96,17 +96,17 @@ def crear_pedido_airtable(nombre, telefono_chat, modelo, textura, modalidad, pre
         tel = telefono_cliente if telefono_cliente else telefono_chat
 
         fields = {
-            "Cliente":   nombre,
-            "Teléfono":  tel,
-            "Modelo":    modelo,
-            "Textura":   textura,
-            "Modalidad": modalidad,
-            "Precio":    precio_total,
-            "Seña":      sena,
-            "Estado":    "Pendiente",
+            "Cliente":             nombre,
+            "Contacto (WhatsApp)": tel,
+            "Modelo":              modelo,
+            "Precio":              precio_total,
+            "Sena cobrada":        sena,
+            "Estado":              "Pendiente",
         }
-        if local:
-            fields["Local"] = local
+        if fecha_encargo:
+            fields["Fecha de encargue"] = fecha_encargo
+        if fecha_entrega:
+            fields["Fecha de entrega"] = fecha_entrega
         if notas:
             fields["Notas"] = notas
 
@@ -443,6 +443,14 @@ TOOLS = [
                         "type": "string",
                         "description": "Solo en modo staff: 'Palermo' o 'Alberti'. Omitir si el cliente se agendó solo."
                     },
+                    "fecha_encargo": {
+                        "type": "string",
+                        "description": "Fecha en que se encargó la bota. Formato YYYY-MM-DD."
+                    },
+                    "fecha_entrega": {
+                        "type": "string",
+                        "description": "Fecha de entrega prometida al cliente. Formato YYYY-MM-DD."
+                    },
                     "notas": {
                         "type": "string",
                         "description": "Observaciones adicionales del pedido. Ej: 'seña cobrada en efectivo', 'talla especial', 'pendiente de medidas'."
@@ -777,11 +785,23 @@ Precios de referencia para que el staff no tenga que calcular:
 - Algo Clásico: $520.000 (seña estándar $260.000)
 - Modelos con terminaciones: desde $540.000 hasta $650.000
 
+Campos que puede recibir el staff para un pedido:
+- Nombre del cliente (obligatorio)
+- Modelo de bota
+- Textura (Suave / Intermedio / Intermedio grueso)
+- Modalidad (Express / Estándar)
+- Precio total
+- Teléfono del cliente
+- Fecha de encargo (cuándo lo encargó)
+- Fecha de entrega (cuándo prometiste entregarlo)
+- Notas adicionales
+
 Ejemplos pedido:
-"LOCAL4045 PEDIDO - Lucía Ramos, Algo Clásico, Intermedio, Estándar, +5491122223333"
-"LOCAL4045 PEDIDO - Roberto Díaz, Modelo campo, Intermedio grueso, Express, +5491144445555, seña cobrada en efectivo"
-"LOCAL443 PEDIDO - Carmen Suárez, Algo Clásico, Suave, Estándar, sin teléfono, medidas pendientes de instructivo"
-"LOCAL4045 PEDIDO - pendientes" (para cargar pedidos que ya tenían antes de activar el sistema)
+"LOCAL4045 PEDIDO - Lucía Ramos, Algo Clásico, Intermedio, Estándar, +5491122223333, encargo 15/06, entrega 20/07"
+"LOCAL4045 PEDIDO - Roberto Díaz, Bota de Gala, Intermedio grueso, Express, +5491144445555, encargo 01/07, entrega 16/07"
+"LOCAL4045 PEDIDO - Carmen Suárez, Algo Clásico, Suave, Estándar, sin teléfono, encargo 10/06, entrega 15/07"
+
+Convertí las fechas al formato YYYY-MM-DD antes de guardar.
 
 ---
 
@@ -923,12 +943,14 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                         nombre=args["nombre_cliente"],
                         telefono_chat=user_phone,
                         modelo=args["modelo"],
-                        textura=args["textura"],
-                        modalidad=args["modalidad"],
-                        precio_total=args["precio_total"],
+                        textura=args.get("textura", ""),
+                        modalidad=args.get("modalidad", "Estándar"),
+                        precio_total=args.get("precio_total", 0),
                         telefono_cliente=args.get("telefono_cliente"),
                         local=args.get("local"),
                         notas=args.get("notas"),
+                        fecha_encargo=args.get("fecha_encargo"),
+                        fecha_entrega=args.get("fecha_entrega"),
                     )
 
                 elif tool_name == "registrar_produccion":
