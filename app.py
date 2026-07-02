@@ -812,6 +812,8 @@ Ejemplos:
 
 Cuando el staff diga "bota de gala" o similar sin aclarar nombre, usá "Sin nombre" y anotá el modelo en notas.
 
+Si el staff manda varias botas juntas (una por línea), llamá a registrar_produccion UNA VEZ POR CADA LÍNEA en paralelo — todas en la misma respuesta. No proceses solo la primera.
+
 ---
 
 PERSONALIDAD Y TONO
@@ -864,82 +866,81 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
         assistant_message = None
 
         if message.tool_calls:
-            tool_call = message.tool_calls[0]
-            tool_name = tool_call.function.name
-
-            if tool_name == "crear_turno":
-                args = json.loads(tool_call.function.arguments)
-                print(f"📅 Creando turno: {args}")
-                result = crear_turno_airtable(
-                    nombre=args["nombre_cliente"],
-                    telefono_chat=user_phone,
-                    servicio=args["servicio"],
-                    fecha=args["fecha"],
-                    hora=args["hora"],
-                    es_urgente=args.get("es_urgente", False),
-                    telefono_cliente=args.get("telefono_cliente"),
-                    local=args.get("local"),
-                    pago=args.get("pago")
-                )
-                # Si es modo staff, quedar esperando foto para adjuntar al turno
-                if result.get("ok") and args.get("local"):
-                    esperando_foto[user_phone] = result["record_id"]
-
-            elif tool_name == "crear_pedido":
-                args = json.loads(tool_call.function.arguments)
-                print(f"📦 Creando pedido: {args}")
-                result = crear_pedido_airtable(
-                    nombre=args["nombre_cliente"],
-                    telefono_chat=user_phone,
-                    modelo=args["modelo"],
-                    textura=args["textura"],
-                    modalidad=args["modalidad"],
-                    precio_total=args["precio_total"],
-                    telefono_cliente=args.get("telefono_cliente"),
-                    local=args.get("local"),
-                    notas=args.get("notas"),
-                )
-
-            elif tool_name == "registrar_produccion":
-                args = json.loads(tool_call.function.arguments)
-                print(f"🔨 Registrando producción: {args}")
-                result = registrar_produccion_airtable(
-                    nombre_cliente=args["nombre_cliente"],
-                    modelo=args["modelo"],
-                    etapa_actual=args["etapa_actual"],
-                    local=args.get("local"),
-                    telefono_cliente=args.get("telefono_cliente"),
-                    notas=args.get("notas"),
-                )
-
-            elif tool_name == "enviar_catalogo_botas":
-                args = json.loads(tool_call.function.arguments)
-                categoria = args.get("categoria")
-                print(f"📸 Enviando catálogo a {user_phone} (categoría: {categoria})")
-                result = enviar_catalogo_botas(user_phone, categoria)
-
-            elif tool_name == "enviar_instructivo_medidas":
-                print(f"📏 Enviando instructivo a {user_phone}")
-                result = enviar_instructivo(user_phone)
-
-            else:
-                result = {"ok": False, "error": "función desconocida"}
-
+            # Agregar el mensaje del asistente con TODOS los tool calls
             conversation_history[user_phone].append({
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [tool_call.model_dump()]
+                "tool_calls": [tc.model_dump() for tc in message.tool_calls]
             })
-            conversation_history[user_phone].append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(result)
-            })
+
+            # Ejecutar cada tool call y agregar su resultado
+            for tool_call in message.tool_calls:
+                tool_name = tool_call.function.name
+                args = json.loads(tool_call.function.arguments)
+
+                if tool_name == "crear_turno":
+                    print(f"📅 Creando turno: {args}")
+                    result = crear_turno_airtable(
+                        nombre=args["nombre_cliente"],
+                        telefono_chat=user_phone,
+                        servicio=args["servicio"],
+                        fecha=args["fecha"],
+                        hora=args["hora"],
+                        es_urgente=args.get("es_urgente", False),
+                        telefono_cliente=args.get("telefono_cliente"),
+                        local=args.get("local"),
+                        pago=args.get("pago")
+                    )
+                    if result.get("ok") and args.get("local"):
+                        esperando_foto[user_phone] = result["record_id"]
+
+                elif tool_name == "crear_pedido":
+                    print(f"📦 Creando pedido: {args}")
+                    result = crear_pedido_airtable(
+                        nombre=args["nombre_cliente"],
+                        telefono_chat=user_phone,
+                        modelo=args["modelo"],
+                        textura=args["textura"],
+                        modalidad=args["modalidad"],
+                        precio_total=args["precio_total"],
+                        telefono_cliente=args.get("telefono_cliente"),
+                        local=args.get("local"),
+                        notas=args.get("notas"),
+                    )
+
+                elif tool_name == "registrar_produccion":
+                    print(f"🔨 Registrando producción: {args}")
+                    result = registrar_produccion_airtable(
+                        nombre_cliente=args["nombre_cliente"],
+                        modelo=args["modelo"],
+                        etapa_actual=args["etapa_actual"],
+                        local=args.get("local"),
+                        telefono_cliente=args.get("telefono_cliente"),
+                        notas=args.get("notas"),
+                    )
+
+                elif tool_name == "enviar_catalogo_botas":
+                    categoria = args.get("categoria")
+                    print(f"📸 Enviando catálogo a {user_phone} (categoría: {categoria})")
+                    result = enviar_catalogo_botas(user_phone, categoria)
+
+                elif tool_name == "enviar_instructivo_medidas":
+                    print(f"📏 Enviando instructivo a {user_phone}")
+                    result = enviar_instructivo(user_phone)
+
+                else:
+                    result = {"ok": False, "error": "función desconocida"}
+
+                conversation_history[user_phone].append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result)
+                })
 
             final = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation_history[user_phone],
-                max_tokens=400,
+                max_tokens=600,
                 temperature=0.7
             )
             assistant_message = final.choices[0].message.content
