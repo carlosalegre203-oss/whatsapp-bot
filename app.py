@@ -132,21 +132,34 @@ def registrar_produccion_airtable(nombre_cliente, modelo, etapa_actual, local=No
     try:
         api = Api(api_token)
 
-        # Construir texto de detalle con toda la info
-        detalle_parts = [f"{nombre_cliente} — {modelo} — Etapa: {etapa_actual}"]
+        # Orden de etapas — para tildar todas las anteriores a la actual
+        ORDEN_ETAPAS = [
+            "Corte", "Seleccion de horma", "Costura", "Colocar fondos",
+            "Clavar tacos", "Colocar cordones", "Cueritos de broche",
+            "Chapita de marca", "Catalonera", "Empopiado de cana",
+            "Lustrado", "Control de calidad"
+        ]
+
+        # Construir texto de detalle
+        detalle_parts = [f"{nombre_cliente} — {modelo}"]
         if local:
             detalle_parts.append(f"Local: {local}")
         if notas:
             detalle_parts.append(notas)
         detalle_texto = " | ".join(detalle_parts)
 
-        # Escribir en Produccion — solo Detalle (campo de texto, siempre funciona)
+        # Marcar como True todas las etapas hasta la actual (inclusive)
+        fields = {"Detalle": detalle_texto}
+        etapa_norm = etapa_actual.strip()
+        if etapa_norm in ORDEN_ETAPAS:
+            idx = ORDEN_ETAPAS.index(etapa_norm)
+            for e in ORDEN_ETAPAS[:idx + 1]:
+                fields[e] = True
+
+        # Escribir en Produccion
         prod_table = api.table(base_id, "Produccion")
         try:
-            prod = prod_table.create({
-                "Detalle": detalle_texto,
-                "Etapa":   etapa_actual,
-            })
+            prod = prod_table.create(fields)
         except Exception:
             prod = prod_table.create({"Detalle": detalle_texto})
 
