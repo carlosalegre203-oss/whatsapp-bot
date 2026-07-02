@@ -132,24 +132,7 @@ def registrar_produccion_airtable(nombre_cliente, modelo, etapa_actual, local=No
     try:
         api = Api(api_token)
 
-        # Crear en Pedidos con estado "En producción"
-        pedidos_table = api.table(base_id, "Pedidos")
-        pedido_fields = {
-            "Cliente":  nombre_cliente,
-            "Modelo":   modelo,
-            "Estado":   "En producción",
-        }
-        tel = telefono_cliente if telefono_cliente else "1111"
-        try:
-            pedido_fields["Teléfono"] = tel
-            pedido = pedidos_table.create(pedido_fields)
-        except Exception:
-            # Si Teléfono no existe en Pedidos, crear sin ese campo
-            pedido_fields.pop("Teléfono", None)
-            pedido = pedidos_table.create(pedido_fields)
-
-        # Crear en Producción con etapa actual
-        prod_table = api.table(base_id, "Produccion")
+        # Construir texto de detalle con toda la info
         detalle_parts = [f"{nombre_cliente} — {modelo} — Etapa: {etapa_actual}"]
         if local:
             detalle_parts.append(f"Local: {local}")
@@ -157,24 +140,18 @@ def registrar_produccion_airtable(nombre_cliente, modelo, etapa_actual, local=No
             detalle_parts.append(notas)
         detalle_texto = " | ".join(detalle_parts)
 
-        # Intentar con todos los campos; si falla, caer a solo Detalle
+        # Escribir en Produccion — solo Detalle (campo de texto, siempre funciona)
+        prod_table = api.table(base_id, "Produccion")
         try:
             prod = prod_table.create({
                 "Detalle": detalle_texto,
                 "Etapa":   etapa_actual,
-                "Pedido":  [{"id": pedido["id"]}],
             })
         except Exception:
-            try:
-                prod = prod_table.create({
-                    "Detalle": detalle_texto,
-                    "Etapa":   etapa_actual,
-                })
-            except Exception:
-                prod = prod_table.create({"Detalle": detalle_texto})
+            prod = prod_table.create({"Detalle": detalle_texto})
 
-        print(f"✅ Bota en producción registrada: Pedido {pedido['id']} / Prod {prod['id']}")
-        return {"ok": True, "pedido_id": pedido["id"], "prod_id": prod["id"]}
+        print(f"✅ Bota en producción registrada: {prod['id']}")
+        return {"ok": True, "prod_id": prod["id"]}
 
     except Exception as e:
         print(f"Error registrando producción: {e}")
