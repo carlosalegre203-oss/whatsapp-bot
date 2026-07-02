@@ -76,6 +76,45 @@ def crear_turno_airtable(nombre, telefono_chat, servicio, fecha, hora, es_urgent
 
 
 # ─────────────────────────────────────────
+# CREAR PEDIDO EN AIRTABLE (botas nuevas)
+# ─────────────────────────────────────────
+def crear_pedido_airtable(nombre, telefono, modelo, textura, modalidad, precio_total, local=None):
+    api_token = os.environ.get("AIRTABLE_API_TOKEN")
+    base_id   = os.environ.get("AIRTABLE_BASE_ID")
+
+    if not api_token or not base_id:
+        return {"ok": False, "error": "Airtable no configurado"}
+
+    try:
+        api   = Api(api_token)
+        table = api.table(base_id, "Pedidos")
+
+        # Seña: 50% estándar, 100% express
+        sena = precio_total if modalidad == "Express" else round(precio_total * 0.5)
+
+        fields = {
+            "Cliente":   nombre,
+            "Teléfono":  telefono,
+            "Modelo":    modelo,
+            "Textura":   textura,
+            "Modalidad": modalidad,
+            "Precio":    precio_total,
+            "Seña":      sena,
+            "Estado":    "Pendiente",
+        }
+        if local:
+            fields["Local"] = local
+
+        record = table.create(fields)
+        print(f"✅ Pedido creado en Airtable: {record['id']}")
+        return {"ok": True, "record_id": record["id"]}
+
+    except Exception as e:
+        print(f"Error creando pedido: {e}")
+        return {"ok": False, "error": str(e)}
+
+
+# ─────────────────────────────────────────
 # ENVIAR FOTOS DEL CATÁLOGO DE BOTAS
 # ─────────────────────────────────────────
 def enviar_catalogo_botas(telefono_destino, categoria=None):
@@ -311,6 +350,46 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "crear_pedido",
+            "description": (
+                "Registra un encargo de botas nuevas en Airtable cuando el cliente confirma el pedido. "
+                "Llamar SOLO cuando el cliente ya confirmó: modelo, textura, modalidad y forma de pago."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre_cliente": {
+                        "type": "string",
+                        "description": "Nombre del cliente"
+                    },
+                    "modelo": {
+                        "type": "string",
+                        "description": "Nombre del modelo elegido (ej: 'Algo Clásico', 'Modelo campo')"
+                    },
+                    "textura": {
+                        "type": "string",
+                        "description": "Textura de cuero: 'Suave', 'Intermedio' o 'Intermedio grueso'"
+                    },
+                    "modalidad": {
+                        "type": "string",
+                        "description": "'Express' (15 días, 100% al encargar) o 'Estándar' (35 días, 50% al encargar)"
+                    },
+                    "precio_total": {
+                        "type": "number",
+                        "description": "Precio total en pesos argentinos (número, sin signo $)"
+                    },
+                    "local": {
+                        "type": "string",
+                        "description": "Solo en modo staff: 'Palermo' o 'Alberti'. Omitir si el cliente se agendó solo."
+                    }
+                },
+                "required": ["nombre_cliente", "modelo", "textura", "modalidad", "precio_total"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "enviar_instructivo_medidas",
             "description": (
                 "Envía al cliente las fotos del instructivo de medidas para fabricar botas nuevas a medida. "
@@ -522,15 +601,18 @@ Preguntá: "¿Lo confirmamos?"
 
 Siempre agregar: "Una vez que recibamos tus medidas, nuestro equipo las revisa y si hay algún ajuste te contactamos antes de empezar la confección."
 
-PASO 7 — INSTRUCTIVO DE MEDIDAS (solo después de que confirme)
-Cuando el cliente confirme → llamá a enviar_instructivo_medidas y decile:
-"¡Perfecto! 🎉 Te mando ahora el instructivo de medidas. Son fotos de cada medida que tenés que tomarte — replicás cada foto y nos las mandás por acá. Nosotros chequeamos que estén bien y te confirmamos. ¡Cualquier duda estamos acá!"
+PASO 7 — REGISTRAR PEDIDO Y ENVIAR INSTRUCTIVO (solo después de que confirme)
+Cuando el cliente confirme el encargo:
+1. Llamá a crear_pedido con: nombre, modelo, textura, modalidad y precio_total.
+2. Luego llamá a enviar_instructivo_medidas.
+3. Decile: "¡Perfecto! 🎉 Registré tu encargo. Te mando ahora el instructivo de medidas — replicás cada foto y nos las enviás por acá. Nosotros chequeamos que estén bien y te confirmamos. ¡Cualquier duda estamos acá!"
 
 REGLAS CRÍTICAS DE BOTAS NUEVAS:
 1. NUNCA mostrés fotos sin antes preguntar para quién son (hombre, mujer, nene, nena) y la edad si es menor.
 2. NUNCA cerrés la venta sin haber recopilado uso, caballos por día y textura acordada.
 3. NUNCA mandés el instructivo sin que el cliente haya confirmado el encargo.
 4. Las preguntas de venta van DE A UNA. El mensaje único de confirmación va junto, una sola vez.
+5. SIEMPRE llamá a crear_pedido antes de enviar_instructivo_medidas — en ese orden.
 
 ---
 
@@ -634,6 +716,19 @@ def get_gpt_response(user_phone: str, user_message: str) -> str:
                 # Si es modo staff, quedar esperando foto para adjuntar al turno
                 if result.get("ok") and args.get("local"):
                     esperando_foto[user_phone] = result["record_id"]
+
+            elif tool_name == "crear_pedido":
+                args = json.loads(tool_call.function.arguments)
+                print(f"📦 Creando pedido: {args}")
+                result = crear_pedido_airtable(
+                    nombre=args["nombre_cliente"],
+                    telefono=user_phone,
+                    modelo=args["modelo"],
+                    textura=args["textura"],
+                    modalidad=args["modalidad"],
+                    precio_total=args["precio_total"],
+                    local=args.get("local"),
+                )
 
             elif tool_name == "enviar_catalogo_botas":
                 args = json.loads(tool_call.function.arguments)
